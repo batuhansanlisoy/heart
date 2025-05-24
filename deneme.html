@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Kalp Animasyonu - Yavaş Çizim & Sonsuz Patlama</title>
+<style>
+  html, body {
+    margin:0; padding:0; overflow:hidden; background:#000; height:100%;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #ff69b4;
+  }
+  canvas {
+    display:block;
+    position:fixed; top:0; left:0;
+  }
+  #periText {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    font-size: 28px;
+    font-weight: bold;
+    color: #ff69b4;
+    text-shadow: 0 0 8px #ff69b4;
+    user-select: none;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div id="periText">Peri</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let w, h, scale;
+
+  function resize(){
+    w = window.innerWidth;
+    h = window.innerHeight;
+    canvas.width = w;
+    canvas.height = h;
+    scale = Math.min(w,h)/35;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function heart(t){
+    const x = 16 * Math.pow(Math.sin(t),3);
+    const y = 13 * Math.cos(t) - 5*Math.cos(2*t) - 2*Math.cos(3*t) - Math.cos(4*t);
+    return {x: w/2 + x*scale, y: h/2 - y*scale};
+  }
+
+  let t = 0;
+  const maxT = Math.PI * 2;
+  const points = [];
+
+  const sparks = [];
+
+  class Spark {
+    constructor(x,y){
+      this.x = x;
+      this.y = y;
+      const angle = Math.random() * 2 * Math.PI;
+      const speed = 1 + Math.random() * 2;
+      this.vx = Math.cos(angle) * speed;
+      this.vy = Math.sin(angle) * speed;
+      this.life = 40 + Math.random()*30;
+      this.size = 1 + Math.random()*3;
+      this.alpha = 1;
+      this.color = `hsl(${Math.random()*40+340}, 100%, 70%)`;
+    }
+    update(){
+      this.x += this.vx;
+      this.y += this.vy;
+      this.life--;
+      this.alpha = this.life / 70;
+    }
+    draw(ctx){
+      ctx.save();
+      ctx.globalAlpha = this.alpha;
+      ctx.fillStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  class Arrow {
+    constructor(){
+      this.x = w + 60;
+      this.y = h/2;
+      this.vx = -10;
+      this.size = 35;
+      this.hit = false;
+      this.opacity = 1;
+    }
+    update(){
+      if(!this.hit){
+        this.x += this.vx;
+        if(this.x < w/2 + scale*2) {
+          this.hit = true;
+        }
+      } else {
+        this.opacity -= 0.05;
+        if(this.opacity < 0) this.opacity = 0;
+      }
+    }
+    draw(ctx){
+      if(this.opacity <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = this.opacity;
+      ctx.strokeStyle = '#ff6eb4';
+      ctx.fillStyle = '#ff6eb4';
+      ctx.lineWidth = 4;
+      ctx.lineJoin = 'round';
+
+      // Ok gövdesi
+      ctx.beginPath();
+      ctx.moveTo(this.x,this.y);
+      ctx.lineTo(this.x - this.size*1.5,this.y);
+      ctx.stroke();
+
+      // Ok ucu
+      ctx.beginPath();
+      ctx.moveTo(this.x,this.y);
+      ctx.lineTo(this.x - this.size/2,this.y - this.size/3);
+      ctx.lineTo(this.x - this.size/2,this.y + this.size/3);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }
+
+  let state = 'drawing'; // drawing, arrow, filling, explosion
+  let arrow = null;
+  let fillProgress = 0;
+  let glowPulse = 0;
+
+  // Patlama için sürekli dönen kıvılcımlar
+  const explosionSparks = [];
+
+  function drawHeartLine(pointsToDraw){
+    if(pointsToDraw.length < 1) return;
+    ctx.save();
+    ctx.shadowColor = '#ff6eb4';
+    ctx.shadowBlur = 15;
+    ctx.strokeStyle = '#ff3d77';
+    ctx.lineWidth = 6;
+    ctx.lineJoin = 'round';
+
+    // Normal çizgi gibi, sadece noktaları sırayla bağla
+    for(let i=0; i<pointsToDraw.length-1; i++){
+      ctx.beginPath();
+      ctx.moveTo(pointsToDraw[i].x, pointsToDraw[i].y);
+      ctx.lineTo(pointsToDraw[i+1].x, pointsToDraw[i+1].y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawHeartFill(progress){
+    if(points.length < 3) return;
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 62, 118, ${progress})`;
+    ctx.shadowColor = `rgba(255, 105, 180, ${progress})`;
+    ctx.shadowBlur = 40 * progress;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for(let i=1; i<points.length; i++){
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function animate(){
+    ctx.clearRect(0,0,w,h);
+
+    if(state === 'drawing'){
+      if(t <= maxT){
+        const p = heart(t);
+        points.push(p);
+        drawHeartLine(points);
+
+        // Kıvılcımlar çizim noktasında
+        if(Math.random() < 0.3){
+          sparks.push(new Spark(p.x, p.y));
+        }
+        t += 0.015;
+      } else {
+        state = 'arrow';
+        arrow = new Arrow();
+      }
+    }
+    else if(state === 'arrow'){
+      drawHeartLine(points);
+      arrow.update();
+      arrow.draw(ctx);
+      sparks.forEach(s => { s.update(); s.draw(ctx); });
+      for(let i = sparks.length-1; i>=0; i--){
+        if(sparks[i].life <= 0) sparks.splice(i,1);
+      }
+      if(arrow.hit){
+        state = 'filling';
+        fillProgress = 0;
+        // Explosion sparks başlat
+        explosionSparks.length = 0;
+        for(let i=0; i<50; i++){
+          const pos = points[Math.floor(Math.random()*points.length)];
+          explosionSparks.push(new Spark(pos.x, pos.y));
+        }
+      }
+    }
+    else if(state === 'filling'){
+      drawHeartLine(points);
+
+      if(fillProgress < 1){
+        fillProgress += 0.01;
+      }
+      drawHeartFill(fillProgress);
+
+      glowPulse += 0.05;
+
+      // Glow & Nabız efekti
+      const glow = 20 + 10 * Math.sin(glowPulse);
+      const pulse = 1 + 0.05 * Math.sin(glowPulse*2);
+
+      ctx.save();
+      ctx.translate(w/2, h/2);
+      ctx.scale(pulse, pulse);
+
+      // Glow gradient
+      let grad = ctx.createRadialGradient(0,0, scale*7, 0,0, scale*11 + glow);
+      grad.addColorStop(0, 'rgba(255,105,180,0.8)');
+      grad.addColorStop(0.5, 'rgba(255,20,90,0.2)');
+      grad.addColorStop(1, 'rgba(255,20,90,0)');
+      ctx.fillStyle = grad;
+
+      ctx.beginPath();
+      ctx.moveTo(points[0].x - w/2, points[0].y - h/2);
+      for(let i=1; i<points.length; i++){
+        ctx.lineTo(points[i].x - w/2, points[i].y - h/2);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Heart outline with glow
+      ctx.shadowColor = 'rgba(255,105,180,1)';
+      ctx.shadowBlur = 35;
+      ctx.strokeStyle = 'rgba(255,62,118,1)';
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x - w/2, points[0].y - h/2);
+      for(let i=1; i<points.length; i++){
+        ctx.lineTo(points[i].x - w/2, points[i].y - h/2);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Patlama kıvılcımlarını yönet ve çiz
+      explosionSparks.forEach(s => {
+        s.update();
+        s.draw(ctx);
+        if(s.life <= 0){
+          // Kıvılcım yenileniyor, kalbin içinde yeni konumda doğuyor
+          const pos = points[Math.floor(Math.random()*points.length)];
+          s.x = pos.x;
+          s.y = pos.y;
+          s.life = 40 + Math.random()*30;
+          s.alpha = 1;
+          const angle = Math.random() * 2 * Math.PI;
+          const speed = 1 + Math.random() * 2;
+          s.vx = Math.cos(angle) * speed;
+          s.vy = Math.sin(angle) * speed;
+        }
+      });
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+})();
+</script>
+
+</body>
+</html>
