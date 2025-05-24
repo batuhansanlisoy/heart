@@ -28,9 +28,8 @@
 </head>
 <body>
 
-<canvas id="c"></canvas>
 <div id="periText">Peri</div>
-
+<canvas id="c"></canvas>
 <script>
 (() => {
   const canvas = document.getElementById('c');
@@ -38,10 +37,15 @@
   let w, h, scale;
 
   function resize(){
+    const dpr = window.devicePixelRatio || 1;
     w = window.innerWidth;
     h = window.innerHeight;
-    canvas.width = w;
-    canvas.height = h;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.setTransform(1,0,0,1,0,0); // reset transform
+    ctx.scale(dpr, dpr);
     scale = Math.min(w,h)/35;
   }
   resize();
@@ -138,13 +142,16 @@
     }
   }
 
-  let state = 'drawing'; // drawing, arrow, filling, explosion
+  let state = 'drawing'; // drawing, arrow, filling, explosion, arrowParticles
   let arrow = null;
   let fillProgress = 0;
   let glowPulse = 0;
 
   // Patlama için sürekli dönen kıvılcımlar
   const explosionSparks = [];
+
+  // Ok partikülleri
+  const arrowSparks = [];
 
   function drawHeartLine(pointsToDraw){
     if(pointsToDraw.length < 1) return;
@@ -155,7 +162,6 @@
     ctx.lineWidth = 6;
     ctx.lineJoin = 'round';
 
-    // Normal çizgi gibi, sadece noktaları sırayla bağla
     for(let i=0; i<pointsToDraw.length-1; i++){
       ctx.beginPath();
       ctx.moveTo(pointsToDraw[i].x, pointsToDraw[i].y);
@@ -181,6 +187,36 @@
     ctx.restore();
   }
 
+  class ArrowSpark {
+    constructor(x,y){
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random()-0.5)*1;
+      this.vy = (Math.random()-1)*1.5;
+      this.life = 30 + Math.random()*20;
+      this.size = 1 + Math.random()*2;
+      this.alpha = 1;
+      this.color = 'pink';
+    }
+    update(){
+      this.x += this.vx;
+      this.y += this.vy;
+      this.life--;
+      this.alpha = this.life / 50;
+    }
+    draw(ctx){
+      ctx.save();
+      ctx.globalAlpha = this.alpha;
+      ctx.fillStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   function animate(){
     ctx.clearRect(0,0,w,h);
 
@@ -190,7 +226,6 @@
         points.push(p);
         drawHeartLine(points);
 
-        // Kıvılcımlar çizim noktasında
         if(Math.random() < 0.3){
           sparks.push(new Spark(p.x, p.y));
         }
@@ -211,7 +246,6 @@
       if(arrow.hit){
         state = 'filling';
         fillProgress = 0;
-        // Explosion sparks başlat
         explosionSparks.length = 0;
         for(let i=0; i<50; i++){
           const pos = points[Math.floor(Math.random()*points.length)];
@@ -229,7 +263,6 @@
 
       glowPulse += 0.05;
 
-      // Glow & Nabız efekti
       const glow = 20 + 10 * Math.sin(glowPulse);
       const pulse = 1 + 0.05 * Math.sin(glowPulse*2);
 
@@ -237,7 +270,6 @@
       ctx.translate(w/2, h/2);
       ctx.scale(pulse, pulse);
 
-      // Glow gradient
       let grad = ctx.createRadialGradient(0,0, scale*7, 0,0, scale*11 + glow);
       grad.addColorStop(0, 'rgba(255,105,180,0.8)');
       grad.addColorStop(0.5, 'rgba(255,20,90,0.2)');
@@ -252,7 +284,6 @@
       ctx.closePath();
       ctx.fill();
 
-      // Heart outline with glow
       ctx.shadowColor = 'rgba(255,105,180,1)';
       ctx.shadowBlur = 35;
       ctx.strokeStyle = 'rgba(255,62,118,1)';
@@ -267,12 +298,10 @@
 
       ctx.restore();
 
-      // Patlama kıvılcımlarını yönet ve çiz
       explosionSparks.forEach(s => {
         s.update();
         s.draw(ctx);
         if(s.life <= 0){
-          // Kıvılcım yenileniyor, kalbin içinde yeni konumda doğuyor
           const pos = points[Math.floor(Math.random()*points.length)];
           s.x = pos.x;
           s.y = pos.y;
@@ -284,6 +313,28 @@
           s.vy = Math.sin(angle) * speed;
         }
       });
+
+      // Ok partikülleri
+      if(!arrow) {
+        arrow = new Arrow();
+        arrow.x = w/2 + scale*2;
+        arrow.y = h/2;
+      }
+
+      if(arrow.opacity === 0) arrow.opacity = 1;
+      arrow.update();
+      arrow.draw(ctx);
+
+      // Arrow sparks generation
+      if(Math.random() < 0.3){
+        arrowSparks.push(new ArrowSpark(arrow.x, arrow.y));
+      }
+      arrowSparks.forEach((sp, i) => {
+        sp.update();
+        sp.draw(ctx);
+        if(sp.life <= 0) arrowSparks.splice(i,1);
+      });
+
     }
 
     requestAnimationFrame(animate);
@@ -292,6 +343,7 @@
   animate();
 })();
 </script>
+
 
 </body>
 </html>
